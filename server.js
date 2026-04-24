@@ -29,7 +29,8 @@ if (missing.length) {
 app.use(cors({
   origin(origin, cb) {
     if (!origin) return cb(null, true);
-    const ok =
+    const ok = 
+      origin.endsWith(".netlify.app") ||
       origin.endsWith(".vercel.app") ||
       origin.endsWith(".onrender.com") ||
       origin === "http://127.0.0.1:5500" ||
