@@ -89,15 +89,42 @@ function requireAdmin(req, res, next) {
 // ══════════════════════════════════════════════
 // 📦 MONGODB
 // ══════════════════════════════════════════════
-mongoose.connect(process.env.MONGODB_URI, {
-  serverSelectionTimeoutMS: 5000,
-  socketTimeoutMS: 45000,
-})
-  .then(() => console.log("✅ MongoDB connected:", mongoose.connection.name))
-  .catch(err => console.error("❌ MongoDB:", err.message));
+// ══════════════════════════════════════════════
+// 📦 MONGODB — with retry + keep-alive
+// ══════════════════════════════════════════════
+mongoose.set('bufferCommands', false);  // fail fast, don't silently queue
+mongoose.set('autoIndex', false);       // don't rebuild indexes on every connect
 
-mongoose.connection.on("disconnected", () => console.warn("⚠️ MongoDB disconnected"));
-mongoose.connection.on("reconnected",  () => console.log("✅ MongoDB reconnected"));
+const connectDB = async (retries = 5) => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS:          60000,
+      heartbeatFrequencyMS:     10000,   // ping every 10s — keeps Render alive
+      maxPoolSize:              10,
+      minPoolSize:              2,       // keep 2 connections warm at all times
+      family:                   4,       // force IPv4 — avoids Render IPv6 issues
+    });
+    console.log("✅ MongoDB connected:", mongoose.connection.name);
+  } catch (err) {
+    console.error(`❌ MongoDB (${retries} retries left):`, err.message);
+    if (retries > 0) {
+      setTimeout(() => connectDB(retries - 1), 5000);
+    } else {
+      console.error("❌ MongoDB: giving up after 5 retries");
+      process.exit(1);
+    }
+  }
+};
+
+connectDB();
+
+mongoose.connection.on("disconnected", () => {
+  console.warn("⚠️ MongoDB disconnected — attempting reconnect…");
+  connectDB(3);
+});
+mongoose.connection.on("reconnected", () => console.log("✅ MongoDB reconnected"));
+mongoose.connection.on("error", err => console.error("❌ MongoDB error:", err.message));
 
 // ══════════════════════════════════════════════
 // 📋 SCHEMAS
